@@ -1,0 +1,6 @@
+/dataset
+__pycache__/
+models/
+reconstructed/
+*.png
+*.txt
