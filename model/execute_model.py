@@ -3,21 +3,21 @@ from advanced_cae import AdvancedCAE
 
 def main():
     # -------- Configuration --------
-    input_shape = (128, 128, 3)
+    input_shape = (128, 128, 1)
     latent_dim = 128
     learning_rate = 1e-4
     ssim_alpha = 0.7
     epochs = 50
 
     # Dataset paths
-    train_dir = "../dataset/train"
-    val_dir = "../dataset/validacion"
-    test_dir = "../dataset/test"
+    train_dir = "../../../MurrayLab_GlobalCTXMosaic_V01_E-004_N-32/split_png_8bit/train"
+    val_dir = "../../../MurrayLab_GlobalCTXMosaic_V01_E-004_N-32/split_png_8bit/val"
+    test_dir = "../../../MurrayLab_GlobalCTXMosaic_V01_E-004_N-32/split_png_8bit/test"
 
     # Output paths
     model_path = "models/advanced_cae.h5"
     recon_output_dir = "reconstructed"
-    log_file = "anomaly_scores.txt"
+    log_file = "anomaly_scores_13082025.txt"
 
     # -------- Preparations --------
     os.makedirs("models", exist_ok=True)

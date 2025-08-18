@@ -1,4 +1,5 @@
 import os
+import random
 import numpy as np
 import cv2
 import tensorflow as tf
@@ -10,10 +11,16 @@ from tensorflow.keras.layers import (
 from tensorflow.keras.optimizers import Adam
 
 class AdvancedCAE:
-    def __init__(self, input_shape=(128, 128, 3), latent_dim=64):
+    def __init__(self, input_shape=(128, 128, 1), latent_dim=64, seed=42):
         self.input_shape = input_shape
         self.latent_dim = latent_dim
         self.alpha = 0.5
+
+        # Reproducibility
+        tf.random.set_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
+
         self._build_model()
 
     def _build_model(self):
@@ -37,16 +44,13 @@ class AdvancedCAE:
         bottleneck = Conv2D(self.latent_dim, 3, padding='same', activation='relu', name="bottleneck")(p3)
 
         # Decoder with skip connections
-        d3 = UpSampling2D()(bottleneck)
-        d3 = Conv2DTranspose(128, 3, padding='same', activation='relu')(d3)
+        d3 = Conv2DTranspose(128, 3, strides=2, padding='same', activation='relu')(bottleneck)
         d3 = Concatenate()([d3, x3])
 
-        d2 = UpSampling2D()(d3)
-        d2 = Conv2DTranspose(64, 3, padding='same', activation='relu')(d2)
+        d2 = Conv2DTranspose(64, 3, strides=2, padding='same', activation='relu')(d3)
         d2 = Concatenate()([d2, x2])
 
-        d1 = UpSampling2D()(d2)
-        d1 = Conv2DTranspose(32, 3, padding='same', activation='relu')(d1)
+        d1 = Conv2DTranspose(32, 3, strides=2, padding='same', activation='relu')(d2)
         d1 = Concatenate()([d1, x1])
 
         decoded = Conv2DTranspose(self.input_shape[2], 3, padding='same', activation='sigmoid', name="decoder_output")(d1)
@@ -66,21 +70,21 @@ class AdvancedCAE:
         self.model.compile(optimizer=Adam(lr), loss=self.mixed_loss, metrics=["mse"])
 
     def _load_images(self, folder):
-        """Loads and preprocesses all images in a folder."""
+        """Loads and preprocesses all grayscale images in a folder."""
         images = []
         for fname in os.listdir(folder):
             fpath = os.path.join(folder, fname)
-            img = cv2.imread(fpath)
+            img = cv2.imread(fpath, cv2.IMREAD_GRAYSCALE)
             if img is None:
                 continue
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             img = cv2.resize(img, self.input_shape[:2])
-            images.append(img.astype(np.float32) / 255.0)
+            img = img.astype(np.float32) / 255.0
+            img = np.expand_dims(img, axis=-1)
+            images.append(img)
         return np.array(images)
 
     def train(self, train_dir, val_dir=None, epochs=100, batch_size=32, model_path="adv_cae.h5"):
         """Trains the autoencoder on image datasets."""
-
         train_images = self._load_images(train_dir)
         if len(train_images) == 0:
             raise ValueError(f"No valid images found in training directory: {train_dir}")
@@ -104,6 +108,7 @@ class AdvancedCAE:
                            epochs=epochs, batch_size=batch_size)
 
         self.model.save(model_path)
+        self.encoder.save("encoder_only.h5")
         print(f"Model saved to {model_path}")
 
     def reconstruct(self, img_array):
@@ -123,19 +128,19 @@ class AdvancedCAE:
         with open(log_path, 'w') as log:
             for fname in os.listdir(folder_in):
                 fpath = os.path.join(folder_in, fname)
-                img = cv2.imread(fpath)
+                img = cv2.imread(fpath, cv2.IMREAD_GRAYSCALE)
                 if img is None:
                     print(f"Could not read: {fname}")
                     continue
 
-                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                img_norm = cv2.resize(img_rgb, self.input_shape[:2]).astype(np.float32) / 255.0
-                score = self.anomaly_score(img_norm)
+                img = cv2.resize(img, self.input_shape[:2]).astype(np.float32) / 255.0
+                img = np.expand_dims(img, axis=-1)
+                score = self.anomaly_score(img)
                 log.write(f"{fname}\t{score:.6f}\n")
 
                 if folder_out:
-                    rec = (self.reconstruct(img_norm) * 255).astype(np.uint8)
-                    rec_bgr = cv2.cvtColor(rec, cv2.COLOR_RGB2BGR)
-                    cv2.imwrite(os.path.join(folder_out, fname), rec_bgr)
+                    rec = (self.reconstruct(img) * 255).astype(np.uint8)
+                    rec = rec.squeeze()  # remove last channel
+                    cv2.imwrite(os.path.join(folder_out, fname), rec)
 
         print(f"Inference complete. Log saved to: {log_path}")
