@@ -5,7 +5,7 @@ from tensorflow.keras.models import load_model
 
 # === CONFIGURATION ===
 MODEL_PATH = "models/advanced_cae.h5"
-INPUT_FOLDER = "../../../MurrayLab_GlobalCTXMosaic_V01_E-004_N-32/output_png"
+INPUT_FOLDER = "../../../MurrayLab_GlobalCTXMosaic_V01_E-004_N-32/output_png_normalized/"
 OUTPUT_FOLDER = "reconstructed"
 LOG_FILE = "anomaly_scores_all.txt"
 INPUT_SHAPE = (128, 128, 1)

@@ -1,14 +1,18 @@
-import os
-import random
-import numpy as np
-import cv2
-import tensorflow as tf
 from tensorflow.keras import Model, Input
 from tensorflow.keras.layers import (
     Conv2D, MaxPooling2D, UpSampling2D,
-    Conv2DTranspose, Concatenate, BatchNormalization
+    Conv2DTranspose, Concatenate, BatchNormalization,
+    Dropout, LeakyReLU
 )
 from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.regularizers import l2
+from tensorflow.keras.callbacks import EarlyStopping
+import tensorflow as tf
+import numpy as np
+import cv2
+import os
+import random
+
 
 class AdvancedCAE:
     def __init__(self, input_shape=(128, 128, 1), latent_dim=64, seed=42):
@@ -16,7 +20,6 @@ class AdvancedCAE:
         self.latent_dim = latent_dim
         self.alpha = 0.5
 
-        # Reproducibility
         tf.random.set_seed(seed)
         np.random.seed(seed)
         random.seed(seed)
@@ -24,33 +27,42 @@ class AdvancedCAE:
         self._build_model()
 
     def _build_model(self):
-        """Builds a convolutional autoencoder with skip connections."""
+        """Builds a convolutional autoencoder with skip connections and regularization."""
         inp = Input(self.input_shape, name="encoder_input")
 
         # Encoder
-        x1 = Conv2D(32, 3, padding='same', activation='relu')(inp)
+        x1 = Conv2D(32, 3, padding='same', kernel_regularizer=l2(1e-4))(inp)
         x1 = BatchNormalization()(x1)
+        x1 = LeakyReLU(0.1)(x1)
+        x1 = Dropout(0.1)(x1)
         p1 = MaxPooling2D()(x1)
 
-        x2 = Conv2D(64, 3, padding='same', activation='relu')(p1)
+        x2 = Conv2D(64, 3, padding='same', kernel_regularizer=l2(1e-4))(p1)
         x2 = BatchNormalization()(x2)
+        x2 = LeakyReLU(0.1)(x2)
+        x2 = Dropout(0.1)(x2)
         p2 = MaxPooling2D()(x2)
 
-        x3 = Conv2D(128, 3, padding='same', activation='relu')(p2)
+        x3 = Conv2D(128, 3, padding='same', kernel_regularizer=l2(1e-4))(p2)
         x3 = BatchNormalization()(x3)
+        x3 = LeakyReLU(0.1)(x3)
+        x3 = Dropout(0.1)(x3)
         p3 = MaxPooling2D()(x3)
 
         # Bottleneck
         bottleneck = Conv2D(self.latent_dim, 3, padding='same', activation='relu', name="bottleneck")(p3)
 
         # Decoder with skip connections
-        d3 = Conv2DTranspose(128, 3, strides=2, padding='same', activation='relu')(bottleneck)
+        d3 = Conv2DTranspose(128, 3, strides=2, padding='same')(bottleneck)
+        d3 = LeakyReLU(0.1)(d3)
         d3 = Concatenate()([d3, x3])
 
-        d2 = Conv2DTranspose(64, 3, strides=2, padding='same', activation='relu')(d3)
+        d2 = Conv2DTranspose(64, 3, strides=2, padding='same')(d3)
+        d2 = LeakyReLU(0.1)(d2)
         d2 = Concatenate()([d2, x2])
 
-        d1 = Conv2DTranspose(32, 3, strides=2, padding='same', activation='relu')(d2)
+        d1 = Conv2DTranspose(32, 3, strides=2, padding='same')(d2)
+        d1 = LeakyReLU(0.1)(d1)
         d1 = Concatenate()([d1, x1])
 
         decoded = Conv2DTranspose(self.input_shape[2], 3, padding='same', activation='sigmoid', name="decoder_output")(d1)
@@ -99,10 +111,12 @@ class AdvancedCAE:
         if val_images is not None:
             print(f"Loaded {len(val_images)} validation images")
 
+        callbacks = [EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)]
+
         if val_images is not None:
             self.model.fit(train_images, train_images,
                            validation_data=(val_images, val_images),
-                           epochs=epochs, batch_size=batch_size)
+                           epochs=epochs, batch_size=batch_size, callbacks=callbacks)
         else:
             self.model.fit(train_images, train_images,
                            epochs=epochs, batch_size=batch_size)
@@ -116,9 +130,15 @@ class AdvancedCAE:
         return self.model.predict(np.expand_dims(img_array, 0), verbose=0)[0]
 
     def anomaly_score(self, img):
-        """Computes anomaly score based on reconstruction error."""
+        """Computes anomaly score based on reconstruction error + SSIM."""
         rec = self.reconstruct(img)
-        return np.mean((img - rec) ** 2)
+        mse = np.mean((img - rec) ** 2)
+        ssim = tf.image.ssim(
+            tf.convert_to_tensor(img[np.newaxis, ...]),
+            tf.convert_to_tensor(rec[np.newaxis, ...]),
+            max_val=1.0
+        ).numpy()[0]
+        return mse + self.alpha * (1 - ssim)
 
     def infer_folder(self, folder_in, folder_out=None, log_path="anomaly_log.txt"):
         """Infers and logs anomaly scores from all images in a folder."""
